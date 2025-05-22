@@ -1,6 +1,6 @@
 // screens/Main/NotificationsScreen.js
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   SafeAreaView,
   View,
@@ -15,44 +15,40 @@ import {
   useTheme,
   List,
   Divider,
-  Button,
-  Chip,
-  FAB,
+  IconButton,
+  Surface,
 } from 'react-native-paper';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { formatDistanceToNow } from 'date-fns';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const INITIAL_NOTIFICATIONS = [
-  {
-    id: '1',
-    title: 'New Product Alert!',
-    message: 'Check out the latest arrivals in electronics.',
-    date: new Date(Date.now() - 3600000).toISOString(),
-    read: false,
-  },
-  {
-    id: '2',
-    title: 'Order Shipped',
-    message: 'Your order #12345 has been shipped.',
-    date: new Date(Date.now() - 86400000).toISOString(),
-    read: true,
-  },
-  {
-    id: '3',
-    title: 'Special Offer',
-    message: 'Get 20% off on all T‑shirts this weekend!',
-    date: new Date(Date.now() - 172800000).toISOString(),
-    read: false,
-  },
-];
+const NOTIFICATIONS_KEY = '@notifications';
 
 export default function NotificationsScreen() {
   const theme = useTheme();
-  const { scheduleLocalNotification, showAppNotification } = useNotifications();
-
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
-  const [filter, setFilter] = useState('All'); // All | Unread | Read
+  const { showAppNotification } = useNotifications();
+  const [notifications, setNotifications] = useState([]);
+  const [filter, setFilter] = useState('All');
   const [refreshing, setRefreshing] = useState(false);
+
+  const loadNotifications = async () => {
+    try {
+      const storedNotifications = await AsyncStorage.getItem(NOTIFICATIONS_KEY);
+      if (storedNotifications) {
+        const parsedNotifications = JSON.parse(storedNotifications);
+        setNotifications(parsedNotifications.sort((a, b) => 
+          new Date(b.timestamp) - new Date(a.timestamp)
+        ));
+      }
+    } catch (error) {
+      console.error('Error loading notifications:', error);
+      showAppNotification('Failed to load notifications', 'error');
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+  }, []);
 
   const filtered = notifications.filter(n => {
     if (filter === 'All') return true;
@@ -60,19 +56,26 @@ export default function NotificationsScreen() {
     if (filter === 'Read') return n.read;
   });
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // In a real app you'd re-fetch; here we just wait 1s
-    setTimeout(() => setRefreshing(false), 1000);
+    await loadNotifications();
+    setRefreshing(false);
   }, []);
 
-  const markAsRead = id => {
-    setNotifications(prev =>
-      prev.map(n => (n.id === id ? { ...n, read: true } : n))
-    );
+  const markAsRead = async (id) => {
+    try {
+      const updatedNotifications = notifications.map(n => 
+        n.id === id ? { ...n, read: true } : n
+      );
+      await AsyncStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(updatedNotifications));
+      setNotifications(updatedNotifications);
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      showAppNotification('Failed to mark notification as read', 'error');
+    }
   };
 
-  const handleDelete = id => {
+  const handleDelete = async (id) => {
     Alert.alert(
       'Delete Notification',
       'Are you sure you want to delete this notification?',
@@ -81,78 +84,121 @@ export default function NotificationsScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () =>
-            setNotifications(prev => prev.filter(n => n.id !== id)),
+          onPress: async () => {
+            try {
+              const updatedNotifications = notifications.filter(n => n.id !== id);
+              await AsyncStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(updatedNotifications));
+              setNotifications(updatedNotifications);
+              showAppNotification('Notification deleted', 'info');
+            } catch (error) {
+              console.error('Error deleting notification:', error);
+              showAppNotification('Failed to delete notification', 'error');
+            }
+          },
         },
       ]
     );
   };
 
+  const clearAll = async () => {
+    Alert.alert(
+      'Clear All',
+      'Delete all notifications?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify([]));
+              setNotifications([]);
+              showAppNotification('All notifications cleared', 'info');
+            } catch (error) {
+              console.error('Error clearing notifications:', error);
+              showAppNotification('Failed to clear notifications', 'error');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case 'success':
+        return 'check-circle';
+      case 'error':
+        return 'alert-circle';
+      case 'warning':
+        return 'alert';
+      default:
+        return 'information';
+    }
+  };
+
+  const getNotificationColor = (type) => {
+    switch (type) {
+      case 'success':
+        return theme.colors.primary;
+      case 'error':
+        return theme.colors.error;
+      case 'warning':
+        return theme.colors.secondary;
+      default:
+        return theme.colors.primary;
+    }
+  };
+
   const renderItem = ({ item }) => (
-    <TouchableOpacity
-      onPress={() => {
-        markAsRead(item.id);
-        showAppNotification(`Notification: ${item.title}`, 'info');
-      }}
-      onLongPress={() => handleDelete(item.id)}
-    >
-      <List.Item
-        title={item.title}
-        description={item.message}
-        descriptionNumberOfLines={2}
-        left={props => (
-          <List.Icon
-            {...props}
-            icon={item.read ? 'email-open-outline' : 'email-outline'}
-            color={item.read ? theme.colors.disabled : theme.colors.primary}
+    <Surface style={[styles.notificationItem, !item.read && styles.unreadItem]}>
+      <TouchableOpacity
+        onPress={() => {
+          if (!item.read) markAsRead(item.id);
+        }}
+        onLongPress={() => handleDelete(item.id)}
+        style={styles.touchable}
+      >
+        <View style={styles.notificationContent}>
+          <IconButton
+            icon={getNotificationIcon(item.type)}
+            size={24}
+            iconColor={getNotificationColor(item.type)}
+            style={styles.icon}
           />
-        )}
-        right={props => (
-          <Text {...props} style={styles.dateText}>
-            {formatDistanceToNow(new Date(item.date), { addSuffix: true })}
-          </Text>
-        )}
-        style={[styles.listItem, !item.read && styles.unreadItem]}
-      />
-      <Divider />
-    </TouchableOpacity>
+          <View style={styles.textContainer}>
+            <Text style={styles.message}>{item.message}</Text>
+            <Text style={styles.timestamp}>
+              {formatDistanceToNow(new Date(item.timestamp), { addSuffix: true })}
+            </Text>
+          </View>
+          {!item.read && <View style={styles.unreadDot} />}
+        </View>
+      </TouchableOpacity>
+    </Surface>
   );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.topButtons}>
-        <Button
-          mode="outlined"
-          onPress={() =>
-            scheduleLocalNotification(
-              'Test Notification',
-              'This is a test device notification!',
-              { screen: 'ProductDetail', id: 'some-product-id' }
-            )
-          }
-          style={styles.testButton}
-        >
-          Test Device Notification
-        </Button>
-        <Button
-          mode="outlined"
-          onPress={() => showAppNotification('Test In-App Message', 'success')}
-          style={styles.testButton}
-        >
-          Test In-App Snackbar
-        </Button>
-      </View>
-
-      <View style={styles.chipRow}>
+      <View style={styles.filterContainer}>
         {['All', 'Unread', 'Read'].map(f => (
-          <Chip
+          <TouchableOpacity
             key={f}
-            selected={filter === f}
+            style={[
+              styles.filterButton,
+              filter === f && { backgroundColor: theme.colors.primary },
+            ]}
             onPress={() => setFilter(f)}
-            style={styles.chip}
           >
-            {f}
-          </Chip>
+            <Text
+              style={[
+                styles.filterText,
+                filter === f && { color: 'white' },
+              ]}
+            >
+              {f}
+            </Text>
+          </TouchableOpacity>
         ))}
       </View>
 
@@ -169,74 +215,101 @@ export default function NotificationsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text>No notifications to show.</Text>
+            <Text style={styles.emptyText}>No notifications to show.</Text>
           </View>
         }
+        contentContainerStyle={styles.listContent}
       />
 
-      <FAB
-        icon="delete"
-        label="Clear All"
-        small
-        style={styles.fab}
-        onPress={() =>
-          Alert.alert(
-            'Clear All',
-            'Delete all notifications?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Clear',
-                style: 'destructive',
-                onPress: () => setNotifications([]),
-              },
-            ]
-          )
-        }
-      />
+      {notifications.length > 0 && (
+        <IconButton
+          icon="delete"
+          size={24}
+          iconColor={theme.colors.error}
+          style={styles.clearButton}
+          onPress={clearAll}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  topButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    padding: 10,
-  },
-  testButton: {
+  container: {
     flex: 1,
-    marginHorizontal: 5,
   },
-  chipRow: {
+  filterContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    padding: 16,
+    gap: 8,
   },
-  chip: {
-    marginHorizontal: 4,
-  },
-  listItem: {
+  filterButton: {
+    paddingHorizontal: 16,
     paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  listContent: {
+    padding: 16,
+  },
+  notificationItem: {
+    marginBottom: 8,
+    borderRadius: 12,
+    elevation: 2,
   },
   unreadItem: {
-    backgroundColor: '#eef',
+    backgroundColor: '#f8f9fa',
   },
-  dateText: {
-    fontSize: 12,
-    color: 'grey',
-    alignSelf: 'center',
-    marginRight: 16,
+  touchable: {
+    padding: 12,
   },
-  emptyContainer: {
-    padding: 20,
+  notificationContent: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  fab: {
+  icon: {
+    margin: 0,
+  },
+  textContainer: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  message: {
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  timestamp: {
+    fontSize: 12,
+    color: '#666',
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2196F3',
+    marginLeft: 8,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  clearButton: {
     position: 'absolute',
     right: 16,
     bottom: 16,
+    backgroundColor: 'white',
+    elevation: 4,
   },
 });

@@ -20,6 +20,8 @@ import BackgroundShapes from '../../components/UI/BackgroundShapes';
 import ProductCard from '../../components/Products/ProductCard';
 import { fetchProducts } from '../../services/productService';
 import { APP_CONFIG } from '../../config/appConfig';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNotifications } from '../../contexts/NotificationContext';
 
 const CATEGORIES = [
   'All',
@@ -32,9 +34,12 @@ const CATEGORIES = [
   'Toys',
 ];
 
+const FAVORITES_KEY = '@favorites';
+
 export default function HomeScreen({ navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { showAppNotification } = useNotifications();
 
   // states...
   const [products, setProducts] = useState([]);
@@ -47,6 +52,8 @@ export default function HomeScreen({ navigation }) {
   const [inputTerm, setInputTerm] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
+
+  const [favorites, setFavorites] = useState({});
 
   const loadProducts = useCallback(
     async (pageNum = 1, refreshing = false) => {
@@ -93,6 +100,58 @@ export default function HomeScreen({ navigation }) {
       // optional refresh on focus
     }, [])
   );
+
+  // Load favorites on mount
+  useEffect(() => {
+    const loadFavorites = async () => {
+      try {
+        const storedFavorites = await AsyncStorage.getItem(FAVORITES_KEY);
+        if (storedFavorites) {
+          setFavorites(JSON.parse(storedFavorites));
+        }
+      } catch (error) {
+        console.error('Error loading favorites:', error);
+      }
+    };
+    loadFavorites();
+  }, []);
+
+  // Save favorites when they change
+  useEffect(() => {
+    const saveFavorites = async () => {
+      try {
+        await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+      } catch (error) {
+        console.error('Error saving favorites:', error);
+      }
+    };
+    saveFavorites();
+  }, [favorites]);
+
+  const handleToggleFavorite = useCallback(async (productId) => {
+    try {
+      const newFavorites = {
+        ...favorites,
+        [productId]: !favorites[productId]
+      };
+      
+      await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(newFavorites));
+      setFavorites(newFavorites);
+
+      // Show notification
+      const product = products.find(p => p.id === productId);
+      if (product) {
+        if (newFavorites[productId]) {
+          showAppNotification(`${product.name} added to favorites!`, 'success');
+        } else {
+          showAppNotification(`${product.name} removed from favorites`, 'info');
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      showAppNotification('Failed to update favorites', 'error');
+    }
+  }, [favorites, products, showAppNotification]);
 
   const handleLoadMore = () => {
     if (!isLoading && hasNextPage) {
@@ -164,7 +223,9 @@ export default function HomeScreen({ navigation }) {
         renderItem={({ item }) => (
           <ProductCard
             item={item}
+            isFavorite={favorites[item.id]}
             onPress={id => navigation.navigate('ProductDetail', { productId: id })}
+            onFavoritePress={() => handleToggleFavorite(item.id)}
           />
         )}
         keyExtractor={item => item.id.toString()}
