@@ -7,6 +7,9 @@ import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
+  TouchableOpacity,
+  Image,
+  Dimensions,
 } from 'react-native';
 import {
   Text,
@@ -14,14 +17,17 @@ import {
   useTheme,
   FAB,
   Chip,
+  Surface,
+  IconButton,
 } from 'react-native-paper';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import BackgroundShapes from '../../components/UI/BackgroundShapes';
 import ProductCard from '../../components/Products/ProductCard';
-import { fetchProducts } from '../../services/productService';
+import { fetchProducts, getProducts, getProductsByCategory } from '../../services/productService';
 import { APP_CONFIG } from '../../config/appConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 const CATEGORIES = [
   'All',
@@ -35,14 +41,17 @@ const CATEGORIES = [
 ];
 
 const FAVORITES_KEY = '@favorites';
+const { width } = Dimensions.get('window');
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen() {
   const theme = useTheme();
-  const styles = makeStyles(theme);
+  const navigation = useNavigation();
   const { showAppNotification } = useNotifications();
+  const styles = makeStyles(theme);
 
   // states...
   const [products, setProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -76,8 +85,10 @@ export default function HomeScreen({ navigation }) {
 
         if (pageNum === 1 || refreshing) {
           setProducts(data);
+          setFilteredProducts(data);
         } else {
           setProducts(prev => [...prev, ...data]);
+          setFilteredProducts(prev => [...prev, ...data]);
         }
         setHasNextPage(response.hasNextPage);
         setPage(pageNum);
@@ -111,6 +122,7 @@ export default function HomeScreen({ navigation }) {
         }
       } catch (error) {
         console.error('Error loading favorites:', error);
+        showAppNotification('Failed to load favorites', 'error');
       }
     };
     loadFavorites();
@@ -123,6 +135,7 @@ export default function HomeScreen({ navigation }) {
         await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
       } catch (error) {
         console.error('Error saving favorites:', error);
+        showAppNotification('Failed to save favorites', 'error');
       }
     };
     saveFavorites();
@@ -167,6 +180,19 @@ export default function HomeScreen({ navigation }) {
   };
   const selectCategory = cat => setActiveCategory(cat);
 
+  const handleSearch = (query) => {
+    setInputTerm(query);
+    if (query) {
+      const filtered = products.filter(product =>
+        (product.title?.toLowerCase() || '').includes(query.toLowerCase()) ||
+        (product.description?.toLowerCase() || '').includes(query.toLowerCase())
+      );
+      setFilteredProducts(filtered);
+    } else {
+      setFilteredProducts(products);
+    }
+  };
+
   if (isLoading && page === 1 && !isRefreshing) {
     return (
       <SafeAreaView style={styles.centered}>
@@ -187,9 +213,19 @@ export default function HomeScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container}>
       <BackgroundShapes />
+      <View style={styles.header}>
+        <Text style={styles.title}>Discover</Text>
+        <IconButton
+          icon="bell"
+          size={24}
+          onPress={() => navigation.navigate('Notifications')}
+          iconColor={theme.colors.primary}
+        />
+      </View>
+
       <Searchbar
         placeholder="Search marketplace"
-        onChangeText={setInputTerm}
+        onChangeText={handleSearch}
         value={inputTerm}
         onSubmitEditing={onSubmitSearch}
         onIconPress={onSubmitSearch}
@@ -219,7 +255,7 @@ export default function HomeScreen({ navigation }) {
         </ScrollView>
       </View>
       <FlatList
-        data={products}
+        data={filteredProducts}
         renderItem={({ item }) => (
           <ProductCard
             item={item}
@@ -267,4 +303,53 @@ const makeStyles = theme =>
     listContent: { paddingHorizontal: 8, paddingBottom: 20 },
     emptyText: { textAlign: 'center', marginTop: 50, fontSize: 16 },
     fab: { position: 'absolute', margin: 16, right: 0, bottom: 0 },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: '#1a1a1a',
+    },
+    searchBar: {
+      margin: 16,
+      elevation: 2,
+      borderRadius: 12,
+    },
+    categoriesList: {
+      paddingHorizontal: 16,
+      gap: 8,
+    },
+    categoryItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+      backgroundColor: '#f0f0f0',
+      marginRight: 8,
+      gap: 8,
+    },
+    categoryText: {
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    productsList: {
+      padding: 8,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    emptyContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 32,
+    },
   });
