@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   SafeAreaView,
-  View,
   StyleSheet,
   Alert,
 } from 'react-native';
@@ -14,114 +13,116 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import { useForm, Controller } from 'react-hook-form';
-import {
-  mockRequestPasswordReset,
-  mockVerifyOtpAndResetPassword,
-} from '../../services/authService';
+import * as Animatable from 'react-native-animatable';
+import { sendPasswordResetEmail, verifyOtpAndResetPassword } from '../../services/emailService';
 
+/**
+ * ForgotPasswordScreen – fully controlled with `react-hook-form`.
+ * 
+ * 1. Fixes mobile autofill misuse by:
+ *    • Disabling autofill globally (`importantForAutofill="noExcludeDescendants"`).
+ *    • Marking the OTP field as a one‑time code and disabling autofill on it.
+ * 2. Sanitises OTP input so *only digits* are stored – any e‑mail text quietly disappears.
+ */
 export default function ForgotPasswordScreen({ navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
 
-  const [isLoading, setIsLoading]         = useState(false);
-  const [error, setError]                 = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [otpSent, setOtpSent]             = useState(false);
-  const [emailForOtp, setEmailForOtp]     = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [emailForOtp, setEmailForOtp] = useState('');
 
-  // email form
-  const {
-    control: emailControl,
-    handleSubmit: handleEmailSubmit,
-    formState: { errors: emailErrors },
-  } = useForm({ defaultValues: { email: '' } });
+  /* -------------------------------------------------------------------------- */
+  /*                              react‑hook‑form                               */
+  /* -------------------------------------------------------------------------- */
+  const emailForm = useForm({ defaultValues: { email: '' } });
+  const resetForm = useForm({ defaultValues: { otp: '', newPassword: '', confirmPassword: '' } });
 
-  // otp + password form
-  const {
-    control: otpControl,
-    handleSubmit: handleOtpSubmit,
-    formState: { errors: otpErrors },
-  } = useForm({
-    defaultValues: { otp: '', newPassword: '', confirmPassword: '' },
-  });
-
-  const onRequestOtp = async data => {
+  /* -------------------------------------------------------------------------- */
+  /*                                   Logic                                    */
+  /* -------------------------------------------------------------------------- */
+  const onRequestOtp = async ({ email }) => {
     setError('');
     setSuccessMessage('');
     setIsLoading(true);
     try {
-      await mockRequestPasswordReset(data.email.trim());
-      setSuccessMessage(
-        'If an account with this email exists, an OTP has been sent (simulated).'
-      );
-      setEmailForOtp(data.email.trim());
+      await sendPasswordResetEmail(email.trim());
+      setSuccessMessage('A password reset code has been sent to your email.');
+      setEmailForOtp(email.trim());
       setOtpSent(true);
+      resetForm.reset();
     } catch (err) {
-      setError(err.message || 'Failed to request password reset.');
+      setError(err.message || 'Failed to send reset code. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const onResetPassword = async data => {
+  const onResetPassword = async ({ otp, newPassword, confirmPassword }) => {
     setError('');
     setSuccessMessage('');
-    if (data.newPassword !== data.confirmPassword) {
+    if (newPassword !== confirmPassword) {
       setError('Passwords do not match.');
       return;
     }
     setIsLoading(true);
     try {
-      await mockVerifyOtpAndResetPassword(
-        emailForOtp,
-        data.otp,
-        data.newPassword
-      );
-      Alert.alert(
-        'Success',
-        'Password reset successfully! Please login with your new password.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
-      );
+      await verifyOtpAndResetPassword(emailForOtp, otp, newPassword);
+      Alert.alert('Success', 'Password reset successfully!', [
+        { text: 'OK', onPress: () => navigation.navigate('Login') },
+      ]);
       setOtpSent(false);
+      emailForm.reset();
+      resetForm.reset();
     } catch (err) {
-      setError(err.message || 'Failed to reset password.');
+      setError(err.message || 'Failed to reset password. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
+  /* -------------------------------------------------------------------------- */
+  /*                                    UI                                      */
+  /* -------------------------------------------------------------------------- */
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Text variant="headlineMedium" style={[styles.title, { color: theme.colors.primary }]}>
-        Forgot Password
-      </Text>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      importantForAutofill="noExcludeDescendants" /* blanket disable */
+    >
+      <Animatable.View animation="fadeInDown" duration={600}>
+        <Text variant="headlineMedium" style={[styles.title, { color: theme.colors.primary }]}>Reset Password</Text>
+      </Animatable.View>
 
-      {error ? (
-        <HelperText type="error" visible style={styles.messageText}>
-          {error}
-        </HelperText>
-      ) : null}
-      {successMessage ? (
-        <HelperText type="info" visible style={styles.messageText}>
-          {successMessage}
-        </HelperText>
-      ) : null}
+      {!!error && (
+        <Animatable.View animation="fadeIn" duration={300}>
+          <HelperText type="error" visible style={styles.messageText}>{error}</HelperText>
+        </Animatable.View>
+      )}
+      {!!successMessage && (
+        <Animatable.View animation="fadeIn" duration={300}>
+          <HelperText type="info" visible style={styles.messageText}>{successMessage}</HelperText>
+        </Animatable.View>
+      )}
 
-      {!otpSent ? (
-        <View style={styles.inner}>
-          <Text style={styles.subtitle}>
-            Enter your email address and we'll send you an OTP to reset your password.
-          </Text>
+      {/* --------------------------------------------------------------------- */}
+      {/*                       1) Ask for the user e‑mail                      */}
+      {/* --------------------------------------------------------------------- */}
+      {!otpSent && (
+        <Animatable.View animation="fadeInUp" delay={200} style={styles.inner}>
+          <Text style={styles.subtitle}>Enter your e‑mail and we'll send a reset code.</Text>
+
           <Controller
-            control={emailControl}
+            control={emailForm.control}
             name="email"
             rules={{
-              required: 'Email is required.',
-              pattern: { value: /^\S+@\S+$/i, message: 'Invalid email format.' },
+              required: 'E‑mail is required.',
+              pattern: { value: /^\S+@\S+$/i, message: 'Invalid e‑mail format.' },
             }}
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
-                label="Email"
+                label="E‑mail"
                 mode="outlined"
                 style={styles.input}
                 onBlur={onBlur}
@@ -129,68 +130,75 @@ export default function ForgotPasswordScreen({ navigation }) {
                 value={value}
                 keyboardType="email-address"
                 autoCapitalize="none"
-                error={!!emailErrors.email}
+                left={<TextInput.Icon icon="email" />}
+                error={!!emailForm.formState.errors.email}
+                textContentType="emailAddress"
+                autoComplete="email"
+                autoCorrect={false}
+                autoCompleteType="email"
               />
             )}
           />
-          {emailErrors.email && (
-            <HelperText type="error" visible>
-              {emailErrors.email.message}
-            </HelperText>
+          {emailForm.formState.errors.email && (
+            <HelperText type="error" visible>{emailForm.formState.errors.email.message}</HelperText>
           )}
 
           <Button
             mode="contained"
-            onPress={handleEmailSubmit(onRequestOtp)}
+            icon="email-send"
             style={styles.button}
             loading={isLoading}
             disabled={isLoading}
-          >
-            Send OTP
-          </Button>
-        </View>
-      ) : (
-        <View style={styles.inner}>
-          <Text style={styles.subtitle}>
-            An OTP was sent to {emailForOtp}. Enter it below along with your new password.
-            (Hint: Mock OTP is 123456)
-          </Text>
+            onPress={emailForm.handleSubmit(onRequestOtp)}
+          >Send Reset Code</Button>
+        </Animatable.View>
+      )}
 
+      {/* --------------------------------------------------------------------- */}
+      {/*               2) Ask for OTP + new password after e‑mail               */}
+      {/* --------------------------------------------------------------------- */}
+      {otpSent && (
+        <Animatable.View animation="fadeInUp" delay={200} style={styles.inner}>
+          <Text style={styles.subtitle}>Enter the code sent to {emailForOtp} and your new password.</Text>
+
+          {/* OTP ----------------------------------------------------------------*/}
           <Controller
-            control={otpControl}
+            control={resetForm.control}
             name="otp"
             rules={{
-              required: 'OTP is required.',
-              minLength: { value: 6, message: 'OTP must be 6 digits.' },
-              maxLength: { value: 6, message: 'OTP must be 6 digits.' },
+              required: 'Reset code is required.',
+              pattern: { value: /^[0-9]{6}$/, message: 'Code must be 6 digits.' },
             }}
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
-                label="OTP"
+                label="Reset Code"
                 mode="outlined"
                 style={styles.input}
                 onBlur={onBlur}
-                onChangeText={onChange}
+                /* Sanitize so only digits persist */
+                onChangeText={(text) => onChange(text.replace(/\D+/g, ''))}
                 value={value}
                 keyboardType="number-pad"
                 maxLength={6}
-                error={!!otpErrors.otp}
+                left={<TextInput.Icon icon="key" />}
+                error={!!resetForm.formState.errors.otp}
+                textContentType="oneTimeCode"
+                autoComplete="one-time-code"
+                autoCompleteType="off"
+                importantForAutofill="no"
+                autoCorrect={false}
               />
             )}
           />
-          {otpErrors.otp && (
-            <HelperText type="error" visible>
-              {otpErrors.otp.message}
-            </HelperText>
+          {resetForm.formState.errors.otp && (
+            <HelperText type="error" visible>{resetForm.formState.errors.otp.message}</HelperText>
           )}
 
+          {/* New password ------------------------------------------------------ */}
           <Controller
-            control={otpControl}
+            control={resetForm.control}
             name="newPassword"
-            rules={{
-              required: 'New password is required.',
-              minLength: { value: 6, message: 'Password must be at least 6 characters.' },
-            }}
+            rules={{ required: 'New password is required.', minLength: { value: 6, message: 'Password must be ≥ 6 chars.' } }}
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 label="New Password"
@@ -200,18 +208,19 @@ export default function ForgotPasswordScreen({ navigation }) {
                 onChangeText={onChange}
                 value={value}
                 secureTextEntry
-                error={!!otpErrors.newPassword}
+                left={<TextInput.Icon icon="lock" />}
+                error={!!resetForm.formState.errors.newPassword}
+                textContentType="newPassword"
+                autoComplete="password-new"
               />
             )}
           />
-          {otpErrors.newPassword && (
-            <HelperText type="error" visible>
-              {otpErrors.newPassword.message}
-            </HelperText>
+          {resetForm.formState.errors.newPassword && (
+            <HelperText type="error" visible>{resetForm.formState.errors.newPassword.message}</HelperText>
           )}
 
           <Controller
-            control={otpControl}
+            control={resetForm.control}
             name="confirmPassword"
             rules={{ required: 'Confirm password is required.' }}
             render={({ field: { onChange, onBlur, value } }) => (
@@ -223,50 +232,64 @@ export default function ForgotPasswordScreen({ navigation }) {
                 onChangeText={onChange}
                 value={value}
                 secureTextEntry
-                error={!!otpErrors.confirmPassword}
+                error={!!resetForm.formState.errors.confirmPassword}
+                left={<TextInput.Icon icon="lock-check" />}
+                textContentType="newPassword"
+                autoComplete="password-new"
               />
             )}
           />
-          {otpErrors.confirmPassword && (
+          {resetForm.formState.errors.confirmPassword && (
             <HelperText type="error" visible>
-              {otpErrors.confirmPassword.message}
+              {resetForm.formState.errors.confirmPassword.message}
             </HelperText>
           )}
 
           <Button
             mode="contained"
-            onPress={handleOtpSubmit(onResetPassword)}
+            onPress={resetForm.handleSubmit(onResetPassword)}
             style={styles.button}
             loading={isLoading}
             disabled={isLoading}
+            icon="check-circle"
           >
             Reset Password
           </Button>
-        </View>
+        </Animatable.View>
       )}
 
-      <Button
-        mode="text"
-        onPress={() => {
-          if (otpSent) setOtpSent(false);
-          else navigation.goBack();
-        }}
-        style={styles.backButton}
-        disabled={isLoading}
-      >
-        {otpSent ? 'Enter Different Email' : 'Back to Login'}
-      </Button>
+      <Animatable.View animation="fadeInUp" delay={300}>
+        <Button
+          mode="text"
+          onPress={() => {
+            if (otpSent) {
+              setOtpSent(false);
+              resetForm.reset();
+            } else {
+              navigation.goBack();
+            }
+          }}
+          style={styles.backButton}
+          disabled={isLoading}
+          icon={otpSent ? 'email-edit' : 'arrow-left'}
+        >
+          {otpSent ? 'Enter Different Email' : 'Back to Login'}
+        </Button>
+      </Animatable.View>
+
+      {isLoading && (
+        <ActivityIndicator style={styles.loader} color={theme.colors.primary} size="large" />
+      )}
     </SafeAreaView>
   );
 }
 
-const makeStyles = theme =>
+const makeStyles = (theme) =>
   StyleSheet.create({
     container: {
       flex: 1,
       padding: 20,
       justifyContent: 'center',
-      backgroundColor: theme.colors.background,
     },
     inner: {
       marginBottom: 20,
@@ -274,12 +297,13 @@ const makeStyles = theme =>
     title: {
       textAlign: 'center',
       marginBottom: 10,
+      fontWeight: 'bold',
     },
     subtitle: {
       textAlign: 'center',
       marginBottom: 20,
       fontSize: 15,
-      color: 'grey',
+      color: theme.colors.onSurfaceVariant,
       paddingHorizontal: 10,
     },
     input: {
@@ -288,6 +312,7 @@ const makeStyles = theme =>
     button: {
       marginTop: 20,
       paddingVertical: 8,
+      borderRadius: 12,
     },
     backButton: {
       marginTop: 15,
@@ -296,5 +321,12 @@ const makeStyles = theme =>
       textAlign: 'center',
       fontSize: 14,
       marginVertical: 5,
+    },
+    loader: {
+      position: 'absolute',
+      top: '50%',
+      left: '50%',
+      marginLeft: -20,
+      marginTop: -20,
     },
   });
